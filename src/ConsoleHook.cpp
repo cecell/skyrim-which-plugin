@@ -171,7 +171,7 @@ namespace ConsoleHook
 				func(a_printer, a_line);
 				if (a_line && TryHandle(a_line)) {
 					constexpr std::size_t kBatchLineBuffer = 0x104;  // the runner's line buffer
-					strcpy_s(a_line, kBatchLineBuffer, "; handled by RuntimeInspector");
+					strcpy_s(a_line, kBatchLineBuffer, "; handled by WhichPlugin");
 				}
 			}
 			static inline REL::Relocation<decltype(thunk)> func;

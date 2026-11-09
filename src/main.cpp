@@ -21,9 +21,9 @@ namespace
 
 SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 {
-	// CommonLib opens Documents\My Games\Skyrim Special Edition\SKSE\RuntimeInspector.log itself.
+	// CommonLib opens Documents\My Games\Skyrim Special Edition\SKSE\WhichPlugin.log itself.
 	SKSE::Init(a_skse, { .trampoline = true, .trampolineSize = 64 });
-	SKSE::log::info("RuntimeInspector loaded, game version {}", REL::Module::get().version().string());
+	SKSE::log::info("WhichPlugin loaded, game version {}", REL::Module::get().version().string());
 
 	if (!SKSE::GetMessagingInterface()->RegisterListener(OnMessage)) {
 		SKSE::log::critical("Failed to register the SKSE message listener");

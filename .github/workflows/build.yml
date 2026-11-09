@@ -1,4 +1,4 @@
-# Builds RuntimeInspector.dll on a clean runner, with the same MSVC toolset as local builds, and
+# Builds WhichPlugin.dll on a clean runner, with the same MSVC toolset as local builds, and
 # checks that it exports what SKSE loads. The plugin only runs inside the game, so there are no
 # tests to run here.
 
@@ -29,12 +29,12 @@ jobs:
           cl 2>&1 | findstr /C:"Version"
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo "-DCMAKE_TOOLCHAIN_FILE=%VCPKG_INSTALLATION_ROOT%\scripts\buildsystems\vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows-static-md -DVCPKG_HOST_TRIPLET=x64-windows-static-md -DVCPKG_OVERLAY_TRIPLETS=triplets || exit /b 1
           cmake --build build || exit /b 1
-          dumpbin /exports build\RuntimeInspector.dll | findstr /C:"SKSEPlugin_Load" || exit /b 1
-          dumpbin /exports build\RuntimeInspector.dll | findstr /C:"SKSEPlugin_Version" || exit /b 1
+          dumpbin /exports build\WhichPlugin.dll | findstr /C:"SKSEPlugin_Load" || exit /b 1
+          dumpbin /exports build\WhichPlugin.dll | findstr /C:"SKSEPlugin_Version" || exit /b 1
 
       - uses: actions/upload-artifact@v4
         with:
-          name: RuntimeInspector
+          name: WhichPlugin
           path: |
-            build/RuntimeInspector.dll
-            build/RuntimeInspector.pdb
+            build/WhichPlugin.dll
+            build/WhichPlugin.pdb

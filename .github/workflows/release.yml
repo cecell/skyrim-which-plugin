@@ -44,7 +44,7 @@ jobs:
         id: version
         shell: pwsh
         run: |
-          $m = Select-String -Path CMakeLists.txt -Pattern 'project\(RuntimeInspector VERSION ([0-9.]+)'
+          $m = Select-String -Path CMakeLists.txt -Pattern 'project\(WhichPlugin VERSION ([0-9.]+)'
           if (-not $m) { throw 'No version in CMakeLists.txt' }
           $version = $m.Matches[0].Groups[1].Value
           if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "v$version") {
@@ -61,8 +61,8 @@ jobs:
           cl 2>&1 | findstr /C:"Version"
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo "-DCMAKE_TOOLCHAIN_FILE=%VCPKG_INSTALLATION_ROOT%\scripts\buildsystems\vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows-static-md -DVCPKG_HOST_TRIPLET=x64-windows-static-md -DVCPKG_OVERLAY_TRIPLETS=triplets || exit /b 1
           cmake --build build || exit /b 1
-          dumpbin /exports build\RuntimeInspector.dll | findstr /C:"SKSEPlugin_Load" || exit /b 1
-          dumpbin /exports build\RuntimeInspector.dll | findstr /C:"SKSEPlugin_Version" || exit /b 1
+          dumpbin /exports build\WhichPlugin.dll | findstr /C:"SKSEPlugin_Load" || exit /b 1
+          dumpbin /exports build\WhichPlugin.dll | findstr /C:"SKSEPlugin_Version" || exit /b 1
 
       - name: Package and hash
         id: package
@@ -73,8 +73,8 @@ jobs:
           # The zip's root is the game's Data folder, so the documents go in a folder of their own
           # instead of landing in Data.
           $plugins = New-Item -ItemType Directory -Force stage/SKSE/Plugins
-          $docs = New-Item -ItemType Directory -Force stage/SKSE/Plugins/RuntimeInspector/licenses
-          Copy-Item build\RuntimeInspector.dll, build\RuntimeInspector.pdb $plugins
+          $docs = New-Item -ItemType Directory -Force stage/SKSE/Plugins/WhichPlugin/licenses
+          Copy-Item build\WhichPlugin.dll, build\WhichPlugin.pdb $plugins
           Copy-Item README.md, LICENSE, THIRD_PARTY_NOTICES.md $docs.Parent
           Copy-Item build\_deps\commonlib-src\COPYING.txt "$docs\CommonLibSSE-NG.txt"
           Copy-Item build\_deps\commonlib-src\EXCEPTIONS.md "$docs\CommonLibSSE-NG-EXCEPTIONS.md"
@@ -85,7 +85,7 @@ jobs:
           }
           $dist = New-Item -ItemType Directory -Force dist
           Compress-Archive -Path "stage/*" -DestinationPath "dist/WhichPlugin-$env:VERSION.zip"
-          Copy-Item build\RuntimeInspector.dll $dist
+          Copy-Item build\WhichPlugin.dll $dist
           $lines = Get-ChildItem $dist -File | Sort-Object Name | ForEach-Object {
             "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(), $_.Name
           }
@@ -98,7 +98,7 @@ jobs:
         uses: actions/attest-build-provenance@v2
         with:
           subject-path: |
-            dist/RuntimeInspector.dll
+            dist/WhichPlugin.dll
             dist/WhichPlugin-*.zip
 
       - name: VirusTotal scan

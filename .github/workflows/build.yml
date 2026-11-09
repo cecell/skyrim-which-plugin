@@ -1,0 +1,40 @@
+# Builds RuntimeInspector.dll on a clean runner, with the same MSVC toolset as local builds, and
+# checks that it exports what SKSE loads. The plugin only runs inside the game, so there are no
+# tests to run here.
+
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2025
+    env:
+      MSVC_TOOLSET: "14.44"
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build and test
+        shell: cmd
+        run: |
+          for /f "usebackq delims=" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set VSPATH=%%i
+          call "%VSPATH%\VC\Auxiliary\Build\vcvars64.bat" -vcvars_ver=%MSVC_TOOLSET% || exit /b 1
+          cl 2>&1 | findstr /C:"Version"
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo "-DCMAKE_TOOLCHAIN_FILE=%VCPKG_INSTALLATION_ROOT%\scripts\buildsystems\vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows-static-md -DVCPKG_HOST_TRIPLET=x64-windows-static-md -DVCPKG_OVERLAY_TRIPLETS=triplets || exit /b 1
+          cmake --build build || exit /b 1
+          dumpbin /exports build\RuntimeInspector.dll | findstr /C:"SKSEPlugin_Load" || exit /b 1
+          dumpbin /exports build\RuntimeInspector.dll | findstr /C:"SKSEPlugin_Version" || exit /b 1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RuntimeInspector
+          path: |
+            build/RuntimeInspector.dll
+            build/RuntimeInspector.pdb

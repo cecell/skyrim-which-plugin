@@ -1,16 +1,56 @@
 # Which Plugin - Console Search
 
 An SKSE plugin that adds the console command `wp`: find loaded plugins, load-order slots and records
-without leaving the game. Type `wp help` in the console for the full syntax.
+without leaving the game. It looks at the game as it is running, so it also finds records that no
+plugin lists, such as ones created by other SKSE plugins or scripts.
+
+Download: [Nexus Mods](https://www.nexusmods.com/skyrimspecialedition/mods/198515) or
+[GitHub releases](https://github.com/cecell/skyrim-which-plugin/releases).
+
+## Examples
 
 ```
-wp                               list every loaded plugin
-wp patch                         plugin name contains, or slot starts with (if hex)
-wp 00012EB7                      which plugin owns a form ID; master, last edit, editor ID
-wp edid~"^Iron.*Sword$"          search records by editor ID
-wp type=WEAP && plugin-name:dawn combine searches with && || !
-wp -d keyword:WeapTypeSword > swords    write one aligned row each to a file
+wp                                     list every loaded plugin
+wp patch                               plugins whose name contains "patch"
+wp 00012EB7                            which plugin owns a form ID; master, last edit, editor ID
+wp edid~"^Iron.*Sword$"                records whose editor ID matches a regex
+wp type=WEAP && plugin-name:dawn       weapons last edited by a plugin with "dawn" in its name
+wp type=SPEL && !plugin-name~"."       spells no plugin lists (made at runtime)
+wp -d keyword:WeapTypeSword > swords   one aligned row each, written to a file
 ```
+
+## Full syntax
+
+This is what `wp help` prints in the console:
+
+```
+WhichPlugin (wp) v0.90 - find loaded plugins, load-order slots and records
+  wp                              list every loaded plugin
+  wp patch                        plugin name contains, or slot starts with (if hex)
+  wp FE                           light plugins + names containing "fe"
+  wp 00012EB7                     which plugin owns a form ID; master, last edit, editor ID
+Combine:  && = AND   || = OR (AND binds first)   ! = NOT   e.g. wp "cc" && !"esl"
+Fields and how they match  (: contains   = exact   ~ regex):
+  plugin-name:dawn                plugin name / for records: last plugin to edit it
+  plugin-master:"Dawnguard"       plugin that has it as a master / for records: the master
+  lobytes:FE0                     slot / form ID starts with (FE0 = FE000-FE0FF)
+  formid:12EB7   formid~"^0A"     a form ID (leading zeros optional)
+  edid:iron   edid=IronSword   edid~"^Iron.*Sword$"
+  type=WEAP   type~"^(ARMO|WEAP)$"   record type
+  keyword:WeapTypeSword   keyword:0001E711   keyword~"^WeapType"
+Using formid, edid, type or keyword searches records; plugin fields then filter them.
+  e.g. wp edid~"^Iron" && plugin-master:dawnguard
+Options (first on the line):  -c/--concise  -d/--detail  -l/--lo-agnostic  --int   (-- ends options)
+  -c  IDs only      -d  one aligned row each      -l  0x00E8F0, "Dawnguard.esm"      --int  decimal
+Quotes: "..." is taken literally. In '...' write \' for an apostrophe.
+Output (at the end of the line):
+  > name     write to My Games\Skyrim Special Edition\name(.txt), replacing it
+  >> name    append to that file;  >> alone appends to the last file used
+  >>>        copy the output to the clipboard
+  |          pipe into text tools (grep, sed, sort... coming soon)
+```
+
+`wp` also works in bat files run with `bat`, and alongside Console Command Extender.
 
 ## Requirements
 
@@ -22,6 +62,13 @@ wp -d keyword:WeapTypeSword > swords    write one aligned row each to a file
 
 Developed and tested on Skyrim 1.6.1170. The DLL also targets other SE and AE versions, but they
 haven't been tested. VR isn't supported.
+
+## Installing
+
+Install the release zip with a mod manager, or copy its `SKSE` folder into the game's `Data` folder.
+It holds `SKSE/Plugins/WhichPlugin.dll`, its `.pdb` (so crash loggers can name functions) and a
+`WhichPlugin` folder with the licences. There is no plugin file. The log is
+`Documents\My Games\Skyrim Special Edition\SKSE\WhichPlugin.log`.
 
 ## Building
 
@@ -41,8 +88,9 @@ local checkout instead.
 ## Releases and changelog
 
 The version lives in `CMakeLists.txt`. Each version's changelog is `release_notes/<version>.md`: a
-summary line, then `## ` sections. Pushing a `v<version>` tag builds, scans and publishes it to GitHub
-and Nexus Mods, and the Nexus changelog comes from that file.
+summary line, then `## ` sections. Pushing a `v<version>` tag makes GitHub Actions build the DLL,
+package and hash it, scan it on VirusTotal, publish a GitHub release with those exact files and upload
+the zip to Nexus Mods as the new version of the page, with the changelog taken from that file.
 
 ## License
 

@@ -221,6 +221,51 @@ namespace WhichPlugin
 			return out;
 		}
 
+		// The entries of a leveled list or form list (with script-added form list entries), each once, in
+		// list order. With a_nested, a nested list's entries follow it (each list is opened once, since
+		// lists can contain each other).
+		std::vector<RE::TESForm*> ListEntries(const RE::TESForm* a_list, bool a_nested)
+		{
+			std::vector<RE::TESForm*>              out;
+			std::unordered_set<const RE::TESForm*> seen;
+			std::unordered_set<const RE::TESForm*> opened;
+			std::vector<const RE::TESForm*>        pending{ a_list };
+			while (!pending.empty()) {
+				const auto* list = pending.back();
+				pending.pop_back();
+				if (!list || !opened.insert(list).second) {
+					continue;
+				}
+				std::vector<RE::TESForm*> entries;
+				if (const auto* leveled = list->As<RE::TESLeveledList>()) {
+					for (const auto& entry : leveled->entries) {
+						entries.push_back(entry.form);
+					}
+				} else if (const auto* formList = list->As<RE::BGSListForm>()) {
+					entries.assign(formList->forms.begin(), formList->forms.end());
+					if (formList->scriptAddedTempForms) {
+						for (const auto id : *formList->scriptAddedTempForms) {
+							entries.push_back(RE::TESForm::LookupByID(id));
+						}
+					}
+				}
+				for (auto* entry : entries) {
+					if (entry && seen.insert(entry).second) {
+						out.push_back(entry);
+					}
+				}
+				// Pushed in reverse, so nested lists are opened in list order.
+				if (a_nested) {
+					for (auto it = entries.rbegin(); it != entries.rend(); ++it) {
+						if (*it && IsList(*it)) {
+							pending.push_back(*it);
+						}
+					}
+				}
+			}
+			return out;
+		}
+
 		// What a refs:, base: or contents: term compares records against. ':' and '=' name one record by
 		// form ID or editor ID, '~' every record whose editor ID matches. The result is
 		//   refs:      those base records (a reference matches if its base is one of them),
@@ -289,40 +334,11 @@ namespace WhichPlugin
 				}
 				break;
 			default:
-				{
-					std::vector<const RE::TESForm*>        pending(named.begin(), named.end());
-					std::unordered_set<const RE::TESForm*> opened;  // lists can contain each other
-					const auto                             add = [&](const RE::TESForm* a_entry) {
-                        if (a_entry) {
-                            out.insert(a_entry);
-                            if (IsList(a_entry)) {
-                                pending.push_back(a_entry);
-                            }
-                        }
-					};
-					while (!pending.empty()) {
-						const auto* list = pending.back();
-						pending.pop_back();
-						if (!opened.insert(list).second) {
-							continue;
-						}
-						if (const auto* leveled = list->As<RE::TESLeveledList>()) {
-							for (const auto& entry : leveled->entries) {
-								add(entry.form);
-							}
-						} else if (const auto* formList = list->As<RE::BGSListForm>()) {
-							for (const auto* entry : formList->forms) {
-								add(entry);
-							}
-							if (formList->scriptAddedTempForms) {
-								for (const auto id : *formList->scriptAddedTempForms) {
-									add(RE::TESForm::LookupByID(id));
-								}
-							}
-						}
-					}
-					break;
+				for (const auto* list : named) {
+					const auto entries = ListEntries(list, true);
+					out.insert(entries.begin(), entries.end());
 				}
+				break;
 			}
 			return out;
 		}
@@ -900,14 +916,10 @@ namespace WhichPlugin
 			EmitCapped(lines);
 		}
 
-		void SearchRecords(const std::vector<std::vector<Term>>& a_groups, const Options& a_opts)
+		// The records matching a query, sorted by form ID.
+		std::vector<RE::TESForm*> CollectRecords(const std::vector<std::vector<Term>>& a_groups, EditorIds& a_edids)
 		{
-			const bool chatty = a_opts.layout != Layout::Concise;
-			if (chatty) {
-				PrintCriteria(a_groups, true);
-			}
-			EditorIds  edids;
-			const auto matchers = BuildMatchers(a_groups, edids);
+			const auto matchers = BuildMatchers(a_groups, a_edids);
 
 			// Candidates come from the game's form-ID table, which only holds live forms. Never take
 			// forms from the editor-ID map: it keeps stale pointers to forms discarded during loading
@@ -942,7 +954,7 @@ namespace WhichPlugin
 					continue;
 				}
 				const bool hit = std::ranges::any_of(matchers, [&](const std::vector<Matcher>& group) {
-					return std::ranges::all_of(group, [&](const Matcher& m) { return MatchesRecord(m, form, edids); });
+					return std::ranges::all_of(group, [&](const Matcher& m) { return MatchesRecord(m, form, a_edids); });
 				});
 				if (hit) {
 					seen.insert(form);
@@ -950,6 +962,17 @@ namespace WhichPlugin
 				}
 			}
 			std::ranges::sort(results, {}, [](const RE::TESForm* f) { return f->GetFormID(); });
+			return results;
+		}
+
+		void SearchRecords(const std::vector<std::vector<Term>>& a_groups, const Options& a_opts)
+		{
+			const bool chatty = a_opts.layout != Layout::Concise;
+			if (chatty) {
+				PrintCriteria(a_groups, true);
+			}
+			EditorIds  edids;
+			const auto results = CollectRecords(a_groups, edids);
 
 			// Only references in memory exist to be found; say so whenever a search asks for them.
 			const bool refsNote = chatty && std::ranges::any_of(std::views::join(a_groups), [](const Term& t) { return t.field == Field::Refs && !t.negated; });
@@ -981,6 +1004,37 @@ namespace WhichPlugin
 			if (chatty && results.size() <= ConsoleCap()) {
 				Print(std::format("  {} records match", results.size()));
 			}
+		}
+
+		// A bare 8-digit hex value (or 0x...) is a form ID.
+		void MarkFormIds(Query::Parsed& a_parsed)
+		{
+			for (auto& group : a_parsed.groups) {
+				for (auto& t : group) {
+					if (t.field == Field::Any && LooksLikeFormId(t.value)) {
+						t.field = Field::FormId;
+						t.match = Match::Contains;
+					}
+				}
+			}
+		}
+
+		// Why keyword, refs, base and contents terms name nothing that exists (empty: they all do).
+		std::vector<std::string> MissingTargets(const Query::Parsed& a_parsed, EditorIds& a_edids)
+		{
+			std::vector<std::string> errors;
+			for (const auto& t : std::views::join(a_parsed.groups)) {
+				std::string error;
+				if (t.field == Field::Keyword) {
+					ResolveKeywords(t, a_edids, error);
+				} else if (Query::IsLookupField(t.field)) {
+					ResolveTargets(t, a_edids, error);
+				}
+				if (!error.empty()) {
+					errors.push_back(std::move(error));
+				}
+			}
+			return errors;
 		}
 
 		// ---------- entry point ----------
@@ -1155,15 +1209,7 @@ namespace WhichPlugin
 				return;
 			}
 
-			// A bare 8-digit hex value (or 0x...) is a form ID.
-			for (auto& group : parsed.groups) {
-				for (auto& t : group) {
-					if (t.field == Field::Any && LooksLikeFormId(t.value)) {
-						t.field = Field::FormId;
-						t.match = Match::Contains;
-					}
-				}
-			}
+			MarkFormIds(parsed);
 
 			// A single form ID gets the detailed report, even if the form doesn't exist (default layout only).
 			if (opts.layout == Layout::Default && parsed.groups.size() == 1 && parsed.groups[0].size() == 1) {
@@ -1176,21 +1222,12 @@ namespace WhichPlugin
 
 			// Keyword, refs, base and contents terms must name records that exist; say so before searching.
 			{
-				EditorIds edids;
-				bool      bad = false;
-				for (const auto& t : std::views::join(parsed.groups)) {
-					std::string error;
-					if (t.field == Field::Keyword) {
-						ResolveKeywords(t, edids, error);
-					} else if (Query::IsLookupField(t.field)) {
-						ResolveTargets(t, edids, error);
-					}
-					if (!error.empty()) {
-						Print(std::format("  Error: {}", error));
-						bad = true;
-					}
+				EditorIds  edids;
+				const auto errors = MissingTargets(parsed, edids);
+				for (const auto& e : errors) {
+					Print(std::format("  Error: {}", e));
 				}
-				if (bad) {
+				if (!errors.empty()) {
 					return;
 				}
 			}
@@ -1227,5 +1264,76 @@ namespace WhichPlugin
 			.numParams = static_cast<std::uint16_t>(std::size(params)),
 			.execute = &ExecuteFromSlot,
 		});
+	}
+
+	std::vector<RE::TESForm*> FindRecords(std::string_view a_query, std::string& a_error)
+	{
+		auto parsed = Query::Parse(a_query);
+		if (!parsed.errors.empty()) {
+			a_error = parsed.errors.front();
+			return {};
+		}
+		MarkFormIds(parsed);  // changes the groups, not the flat term list
+		if (!std::ranges::any_of(std::views::join(parsed.groups), [](const Term& t) { return Query::IsRecordField(t.field); })) {
+			a_error = "not a record search: use formid, edid, name, type, keyword, refs, base or contents (FindPlugins searches plugins)";
+			return {};
+		}
+		EditorIds  edids;
+		const auto errors = MissingTargets(parsed, edids);
+		if (!errors.empty()) {
+			a_error = errors.front();
+			return {};
+		}
+		return CollectRecords(parsed.groups, edids);
+	}
+
+	std::vector<const RE::TESFile*> FindPlugins(std::string_view a_query, std::string& a_error)
+	{
+		const auto all = LoadOrder::AllLoaded();
+		const auto parsed = Query::Parse(a_query);
+		if (!parsed.errors.empty()) {
+			a_error = parsed.errors.front();
+			return {};
+		}
+		if (parsed.terms.empty()) {
+			return all;
+		}
+		if (std::ranges::any_of(parsed.terms, [](const Term& t) { return Query::IsRecordField(t.field); })) {
+			a_error = "a record search: use Find for records";
+			return {};
+		}
+		EditorIds                       edids;
+		const auto                      matchers = BuildMatchers(parsed.groups, edids);
+		std::vector<const RE::TESFile*> hits;
+		for (auto* file : all) {
+			if (std::ranges::any_of(matchers, [&](const std::vector<Matcher>& g) { return std::ranges::all_of(g, [&](const Matcher& m) { return MatchesPlugin(m, file); }); })) {
+				hits.push_back(file);
+			}
+		}
+		return hits;
+	}
+
+	std::vector<RE::TESForm*> ListContents(const RE::TESForm* a_list, bool a_nested)
+	{
+		return a_list && IsList(a_list) ? ListEntries(a_list, a_nested) : std::vector<RE::TESForm*>{};
+	}
+
+	std::vector<RE::TESObjectREFR*> References(const RE::TESForm* a_base)
+	{
+		std::vector<RE::TESObjectREFR*> out;
+		if (!a_base) {
+			return out;
+		}
+		const auto& [map, lock] = RE::TESForm::GetAllForms();
+		const RE::BSReadLockGuard guard{ lock };
+		if (map) {
+			for (const auto& [id, form] : *map) {
+				if (auto* ref = form ? form->AsReference() : nullptr; ref && ref->GetBaseObject() == a_base) {
+					out.push_back(ref);
+				}
+			}
+		}
+		std::ranges::sort(out, {}, [](const RE::TESObjectREFR* r) { return r->GetFormID(); });
+		return out;
 	}
 }

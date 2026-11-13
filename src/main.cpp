@@ -1,4 +1,5 @@
 #include "ConsoleHook.h"
+#include "Papyrus.h"
 #include "Settings.h"
 #include "WhichPlugin.h"
 
@@ -32,6 +33,8 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 	for (const auto& problem : problems) {
 		SKSE::log::warn("WhichPlugin.ini: {}", problem);
 	}
+
+	Papyrus::Register();
 
 	if (!SKSE::GetMessagingInterface()->RegisterListener(OnMessage)) {
 		SKSE::log::critical("Failed to register the SKSE message listener");

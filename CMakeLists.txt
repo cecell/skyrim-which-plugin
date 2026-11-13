@@ -32,6 +32,7 @@ add_commonlibsse_plugin(${PROJECT_NAME}
 	SOURCES
 		src/main.cpp
 		src/Open.cpp
+		src/Papyrus.cpp
 		src/Settings.cpp
 		src/ConsoleCommands.cpp
 		src/ConsoleHook.cpp

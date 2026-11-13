@@ -15,4 +15,14 @@ namespace WhichPlugin
 	// Registers the command with the console hook (full syntax) and in a console command slot
 	// (so it shows up in the console's help and still works if the hook couldn't be installed).
 	void Register();
+
+	// For the Papyrus API. a_query is a search as typed after "wp" (no options, > or |).
+	std::vector<RE::TESForm*>       FindRecords(std::string_view a_query, std::string& a_error);
+	std::vector<const RE::TESFile*> FindPlugins(std::string_view a_query, std::string& a_error);
+
+	// What a leveled list or form list holds, each entry once (a_nested: nested lists' entries too).
+	std::vector<RE::TESForm*> ListContents(const RE::TESForm* a_list, bool a_nested);
+
+	// The references in memory placed from a base record, by form ID.
+	std::vector<RE::TESObjectREFR*> References(const RE::TESForm* a_base);
 }

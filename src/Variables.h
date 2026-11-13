@@ -22,6 +22,13 @@ namespace Variables
 	bool RunCommand(std::string_view a_args);
 	bool IsCommand(std::string_view a_args);
 
+	// For the Papyrus API (safe from any thread). Get: a variable's value (built-ins too), or nullopt
+	// with a_error. Set/Unset change the variables you set and save vars.json; false with a_error
+	// if the name is invalid or built in, or a limit is reached.
+	std::optional<std::string> Get(std::string_view a_name, std::string& a_error);
+	bool                       Set(std::string_view a_name, std::string a_value, std::string& a_error);
+	bool                       Unset(std::string_view a_name, std::string& a_error);
+
 	void SetLastOutput(const std::vector<std::string>& a_lines);
 	void SetLastRecord(RE::FormID a_id);
 }

@@ -24,6 +24,9 @@ jobs:
       - name: Check the README matches wp help
         run: python tools/sync_readme_help.py --check
 
+      - name: Check the compiled Papyrus script matches its source
+        run: python tools/build_papyrus.py --check
+
       - name: Build and test
         shell: cmd
         run: |

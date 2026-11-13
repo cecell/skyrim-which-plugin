@@ -84,6 +84,11 @@ jobs:
           foreach ($p in 'directxmath', 'directxtk', 'fmt', 'nlohmann-json', 'rapidcsv', 'simpleini', 'spdlog', 'toml11', 'xbyak') {
             Copy-Item "build\vcpkg_installed\x64-windows-static-md\share\$p\copyright" "$docs\$p.txt"
           }
+          # The Papyrus script, compiled locally (tools/build_papyrus.py), and its source for other mods.
+          $scripts = New-Item -ItemType Directory -Force stage/Scripts
+          $sources = New-Item -ItemType Directory -Force stage/Source/Scripts
+          Copy-Item papyrus/Scripts/WhichPlugin.pex $scripts
+          Copy-Item papyrus/Source/Scripts/WhichPlugin.psc $sources
           $dist = New-Item -ItemType Directory -Force dist
           Compress-Archive -Path "stage/*" -DestinationPath "dist/WhichPlugin-$env:VERSION.zip"
           Copy-Item build\WhichPlugin.dll $dist

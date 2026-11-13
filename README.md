@@ -124,11 +124,39 @@ wp -c type=ARMO | sed 's/^/player.additem /; s/$/ 1/' > give.txt
 
 Patterns are regular expressions in the JavaScript style.
 
+## For mod authors: Papyrus
+
+The zip includes `Scripts/WhichPlugin.pex` and its source `Source/Scripts/WhichPlugin.psc`, so your scripts
+can run the same searches. A query is written as after `wp`, without options, `>` or `|`:
+
+```papyrus
+Form[] swords = WhichPlugin.Find("type=WEAP && name:sword")
+if swords.Length == 0
+    Debug.Trace("No swords: " + WhichPlugin.GetLastError())
+endif
+```
+
+| Function | What it returns |
+|---|---|
+| `Form[] Find(string asQuery, int aiMax = 1000)` | The records a search finds, sorted by form ID (up to 10000) |
+| `string[] FindPlugins(string asQuery)` | Names of the loaded plugins a plugin search matches (`""` = all) |
+| `string GetLastError()` | Why the last call returned nothing |
+| `string GetMasterPlugin(Form)`, `GetLastEditingPlugin(Form)`, `string[] GetEditingPlugins(Form)` | The plugins with the record, in load order |
+| `int GetLocalFormID(Form)`, `string GetOwnerPlugin(Form)` | The inverse of `Game.GetFormFromFile`: -1 and `""` for runtime forms |
+| `ObjectReference[] GetReferences(Form akBase)` | References in memory placed from a base record |
+| `Form[] GetListContents(Form akList, bool abNested = true)` | What a leveled list or form list holds |
+| `string GetVariable(string)`, `bool SetVariable(string, string)`, `bool UnsetVariable(string)` | `wp`'s variables, built-ins included |
+| `string GetVersion()` | The DLL's version |
+
+`tools/build_papyrus.py` compiles the script (it needs the Creation Kit's compiler) and removes the user and
+computer name the compiler writes into the `.pex`.
+
 ## Installing
 
 Install the release zip with a mod manager, or copy its `SKSE` folder into the game's `Data` folder.
 It holds `SKSE/Plugins/WhichPlugin.dll`, its `.pdb` (so crash loggers can name functions), the
-settings file `WhichPlugin.ini` and a `WhichPlugin` folder with the licences. There is no plugin file. The log is
+settings file `WhichPlugin.ini`, a `WhichPlugin` folder with the licences, and the Papyrus script
+`Scripts/WhichPlugin.pex` with its source. There is no plugin file. The log is
 `Documents\My Games\Skyrim Special Edition\SKSE\WhichPlugin.log`.
 
 ## Settings

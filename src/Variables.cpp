@@ -21,9 +21,10 @@ namespace Variables
 			return vars;
 		}
 
-		std::string g_lastOutput;
-		RE::FormID  g_lastRecord = 0;
-		bool        g_loaded = false;
+		std::string          g_lastOutput;
+		RE::FormID           g_lastRecord = 0;
+		bool                 g_loaded = false;
+		std::recursive_mutex g_lock;  // the console runs on the main thread, Papyrus on its own threads
 
 		constexpr std::array kBuiltIns{ "SELECTED"sv, "CROSSHAIR"sv, "PLAYER"sv, "CELL"sv, "WORLDSPACE"sv,
 			"LAST_RECORD"sv, "LAST_FILE"sv, "LAST_OUTPUT"sv, "CLIPBOARD"sv };
@@ -83,11 +84,12 @@ namespace Variables
 			}
 		}
 
-		bool Save()
+		// Writes vars.json. False with a_error if it couldn't (the change then lasts this session only).
+		bool Save(std::string& a_error)
 		{
 			const auto path = File();
 			if (!path) {
-				Print("  Couldn't find the My Games\\Skyrim Special Edition folder; the variable is set for this session only");
+				a_error = "couldn't find the My Games\\Skyrim Special Edition folder; the change lasts for this session only";
 				return false;
 			}
 			nlohmann::json json = nlohmann::json::object();
@@ -99,10 +101,15 @@ namespace Variables
 			std::ofstream out(*path, std::ios::binary | std::ios::trunc);
 			out << json.dump(2) << '\n';
 			if (!out) {
-				Print(std::format("  Couldn't write {}; the variable is set for this session only", path->string()));
+				a_error = std::format("couldn't write {}; the change lasts for this session only", path->string());
 				return false;
 			}
 			return true;
+		}
+
+		bool ValidName(std::string_view a_name)
+		{
+			return !a_name.empty() && IsNameStart(a_name[0]) && std::ranges::all_of(a_name, IsNameChar);
 		}
 
 		std::string Hex(RE::FormID a_id) { return std::format("{:08X}", a_id); }
@@ -191,6 +198,7 @@ namespace Variables
 			if (IsBuiltIn(a_name)) {
 				return BuiltIn(a_name, a_error);
 			}
+			const std::scoped_lock lock{ g_lock };
 			Load();
 			if (const auto it = User().find(std::string{ a_name }); it != User().end()) {
 				return it->second;
@@ -347,6 +355,7 @@ namespace Variables
 		const auto split = text.find_first_of(" \t");
 		const auto word = Upper(text.substr(0, split));
 		const auto rest = split == std::string_view::npos ? std::string_view{} : Trim(text.substr(split));
+		const std::scoped_lock lock{ g_lock };
 		Load();
 
 		if (word == "ENV") {
@@ -367,49 +376,84 @@ namespace Variables
 			return true;
 		}
 
-		const auto valid = [](std::string_view a_name) {
-			return !a_name.empty() && IsNameStart(a_name[0]) && std::ranges::all_of(a_name, IsNameChar);
-		};
-
+		std::string error;
 		if (word == "UNSET") {
-			if (!valid(rest)) {
+			if (!ValidName(rest)) {
 				Print("  wp unset NAME: removes a variable you set (wp env lists them)");
-			} else if (User().erase(std::string{ rest }) == 0) {
-				Print(std::format("  ${} isn't set", rest));
-			} else {
-				Save();
+			} else if (Unset(rest, error)) {
 				Print(std::format("  Removed ${}", rest));
+			} else {
+				Print(std::format("  {}", error));
 			}
 			return true;
 		}
 
 		// export NAME=value
 		const auto equals = rest.find('=');
-		const auto name = equals == std::string_view::npos ? rest : Trim(rest.substr(0, equals));
-		if (equals == std::string_view::npos || !valid(name)) {
+		if (equals == std::string_view::npos) {
 			Print("  wp export NAME=value: NAME is letters, digits and _ (not starting with a digit)");
 			return true;
 		}
-		if (IsBuiltIn(name)) {
-			Print(std::format("  ${} is built in and can't be set", Upper(name)));
-			return true;
-		}
+		const auto  name = Trim(rest.substr(0, equals));
 		std::string value{ Trim(rest.substr(equals + 1)) };
 		if (value.size() >= 2 && (value.front() == '"' || value.front() == '\'') && value.back() == value.front()) {
 			value = value.substr(1, value.size() - 2);
 		}
+		const auto shown = Shorten(value);
+		if (Set(name, std::move(value), error)) {
+			Print(std::format("  ${}={}", name, shown));
+		}
+		if (!error.empty()) {
+			Print(std::format("  {}", error));
+		}
+		return true;
+	}
+
+	std::optional<std::string> Get(std::string_view a_name, std::string& a_error)
+	{
+		if (!ValidName(a_name)) {
+			a_error = std::format("'{}' isn't a variable name (letters, digits and _)", a_name);
+			return std::nullopt;
+		}
+		return Value(a_name, a_error);
+	}
+
+	bool Set(std::string_view a_name, std::string a_value, std::string& a_error)
+	{
+		if (!ValidName(a_name)) {
+			a_error = std::format("'{}' isn't a variable name: letters, digits and _, not starting with a digit", a_name);
+			return false;
+		}
+		if (IsBuiltIn(a_name)) {
+			a_error = std::format("${} is built in and can't be set", Upper(a_name));
+			return false;
+		}
 		const auto& s = Settings::Get();
-		if (value.size() > s.maxVariableLength) {
-			Print(std::format("  ${} would be {} characters; the limit is {} (iMaxVariableLength)", name, value.size(), s.maxVariableLength));
-			return true;
+		if (a_value.size() > s.maxVariableLength) {
+			a_error = std::format("${} would be {} characters; the limit is {} (iMaxVariableLength)", a_name, a_value.size(), s.maxVariableLength);
+			return false;
 		}
-		if (!User().contains(std::string{ name }) && User().size() >= s.maxVariables) {
-			Print(std::format("  There are already {} variables, the limit (iMaxVariables); wp unset one first", User().size()));
-			return true;
+		const std::scoped_lock lock{ g_lock };
+		Load();
+		const std::string name{ a_name };
+		if (!User().contains(name) && User().size() >= s.maxVariables) {
+			a_error = std::format("there are already {} variables, the limit (iMaxVariables); unset one first", User().size());
+			return false;
 		}
-		User()[std::string{ name }] = value;
-		Save();
-		Print(std::format("  ${}={}", name, Shorten(value)));
+		User()[name] = std::move(a_value);
+		Save(a_error);  // the variable is set either way; a_error says if it wasn't saved
+		return true;
+	}
+
+	bool Unset(std::string_view a_name, std::string& a_error)
+	{
+		const std::scoped_lock lock{ g_lock };
+		Load();
+		if (User().erase(std::string{ a_name }) == 0) {
+			a_error = std::format("${} isn't set", a_name);
+			return false;
+		}
+		Save(a_error);
 		return true;
 	}
 

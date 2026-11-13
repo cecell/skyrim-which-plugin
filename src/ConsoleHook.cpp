@@ -3,6 +3,9 @@
 #include "ConsoleCommands.h"
 #include "Pipeline.h"
 #include "Redirect.h"
+#include "Settings.h"
+#include "TextTools.h"
+#include "Variables.h"
 
 namespace ConsoleHook
 {
@@ -21,57 +24,135 @@ namespace ConsoleHook
 			return commands;
 		}
 
+		std::string_view Trim(std::string_view a_text)
+		{
+			const auto first = a_text.find_first_not_of(" \t");
+			if (first == std::string_view::npos) {
+				return {};
+			}
+			return a_text.substr(first, a_text.find_last_not_of(" \t") - first + 1);
+		}
+
 		bool EqualsNoCase(std::string_view a_lhs, std::string_view a_rhs)
 		{
 			return a_lhs.size() == a_rhs.size() &&
 			       std::ranges::equal(a_lhs, a_rhs, [](unsigned char a, unsigned char b) { return std::tolower(a) == std::tolower(b); });
 		}
 
-		// Returns true if the line was one of ours (and has been handled).
-		bool TryHandle(std::string_view a_line)
+		// One of our commands and the text after its name, or nullptr if a_line isn't ours.
+		const Command* Find(std::string_view a_line, std::string_view& a_args)
 		{
 			const auto start = a_line.find_first_not_of(" \t");
 			if (start == std::string_view::npos) {
-				return false;
+				return nullptr;
 			}
 			a_line.remove_prefix(start);
 			const auto nameEnd = a_line.find_first_of(" \t");
 			const auto name = a_line.substr(0, nameEnd);
-			const auto args = nameEnd == std::string_view::npos ? std::string_view{} : a_line.substr(nameEnd + 1);
-
+			a_args = nameEnd == std::string_view::npos ? std::string_view{} : a_line.substr(nameEnd + 1);
 			for (const auto& cmd : Commands()) {
 				if (EqualsNoCase(name, cmd.longName) || EqualsNoCase(name, cmd.shortName)) {
-					Redirect::Target target;
-					const auto       beforeRedirect = Redirect::Split(args, target);
-					if (!target.error.empty()) {
-						ConsoleCommands::Print(std::format("{}: {}", cmd.longName, target.error));
-						return true;
-					}
-					const auto stages = Pipeline::Split(beforeRedirect);
-					if (stages.size() > 1) {
-						ConsoleCommands::Print(std::format("{}: '|' is a pipe (text tools like grep and sort are coming). "
-														   "For AND use &&, for OR use ||, for NOT use !",
-							cmd.longName));
-						return true;
-					}
-					const auto commandArgs = stages[0];
-					std::vector<std::string> lines;
-					try {
-						ConsoleCommands::Capture capture{ target.kind != Redirect::Kind::None };
-						cmd.handler(commandArgs);
-						lines = capture.Lines();
-					} catch (const std::exception& e) {
-						// An exception escaping into game code would terminate the game (e.g. std::regex
-						// throws error_complexity/error_stack on pathological patterns).
-						ConsoleCommands::Print(std::format("{}: stopped - {}", cmd.longName, e.what()));
-						SKSE::log::error("{} '{}' threw: {}", cmd.longName, args, e.what());
-						return true;
-					}
-					Redirect::Deliver(target, lines);
-					return true;
+					return &cmd;
 				}
 			}
-			return false;
+			return nullptr;
+		}
+
+		// Runs the command line inside $(...): nothing is printed, and its output is returned.
+		std::optional<std::vector<std::string>> RunSilently(std::string_view a_line, std::string& a_error)
+		{
+			std::string_view args;
+			const auto*      cmd = Find(a_line, args);
+			if (!cmd) {
+				a_error = std::format("$({}) - only {} commands can run inside $(...)", a_line, Commands().empty() ? "our" : Commands().front().shortName);
+				return std::nullopt;
+			}
+			std::string expanded;
+			if (!Variables::Expand(args, &RunSilently, expanded, a_error)) {
+				return std::nullopt;
+			}
+			Redirect::Target target;
+			const auto       command = Redirect::Split(expanded, target);
+			if (target.kind != Redirect::Kind::None || Pipeline::Split(command).size() > 1) {
+				a_error = std::format("$({}) - no > or | inside $(...)", a_line);
+				return std::nullopt;
+			}
+			ConsoleCommands::Capture capture{ false, true };
+			cmd->handler(command);
+			return capture.Lines();
+		}
+
+		// Returns true if the line was one of ours (and has been handled).
+		bool TryHandle(std::string_view a_line)
+		{
+			std::string_view args;
+			const auto*      cmd = Find(a_line, args);
+			if (!cmd) {
+				return false;
+			}
+			try {
+				// Variables first, so $NAME can also stand in a file name after >.
+				std::string expanded;
+				std::string error;
+				if (!Variables::Expand(args, &RunSilently, expanded, error)) {
+					ConsoleCommands::Print(std::format("{}: {}", cmd->longName, error));
+					return true;
+				}
+
+				Redirect::Target target;
+				const auto       beforeRedirect = Redirect::Split(expanded, target);
+				if (!target.error.empty()) {
+					ConsoleCommands::Print(std::format("{}: {}", cmd->longName, target.error));
+					return true;
+				}
+				const auto               stages = Pipeline::Split(beforeRedirect);
+				const bool               redirecting = target.kind != Redirect::Kind::None;
+				std::vector<std::string> lines;
+				if (stages.size() == 1) {
+					ConsoleCommands::Capture capture{ redirecting };
+					cmd->handler(stages[0]);
+					lines = capture.Lines();
+				} else {
+					// The command's whole output (past the console cap too) goes through the text
+					// tools unprinted; only the result is shown.
+					{
+						ConsoleCommands::Capture capture{ true, true };
+						cmd->handler(stages[0]);
+						lines = capture.Lines();
+					}
+					for (std::size_t i = 1; i < stages.size(); ++i) {
+						auto result = TextTools::Run(stages[i], lines, error);
+						if (!result) {
+							ConsoleCommands::Print(std::format("{}: | {}: {}", cmd->longName, Trim(stages[i]), error));
+							return true;
+						}
+						lines = std::move(*result);
+					}
+					ConsoleCommands::Capture capture{ redirecting };
+					const auto               cap = Settings::Get().maxConsoleLines;
+					for (std::size_t i = 0; i < lines.size(); ++i) {
+						if (i < cap) {
+							ConsoleCommands::Print(lines[i]);
+						} else if (redirecting) {
+							ConsoleCommands::PrintRedirectOnly(lines[i]);
+						} else {
+							ConsoleCommands::Print(std::format("  ... {} more lines; add > name to save them all to a file", lines.size() - cap));
+							break;
+						}
+					}
+					lines = capture.Lines();
+				}
+				if (!Variables::IsCommand(stages[0])) {
+					Variables::SetLastOutput(lines);
+				}
+				Redirect::Deliver(target, lines);
+			} catch (const std::exception& e) {
+				// An exception escaping into game code would terminate the game (e.g. std::regex
+				// throws error_complexity/error_stack on pathological patterns).
+				ConsoleCommands::Print(std::format("{}: stopped - {}", cmd->longName, e.what()));
+				SKSE::log::error("{} '{}' threw: {}", cmd->longName, args, e.what());
+			}
+			return true;
 		}
 
 		struct CompileAndRunHook

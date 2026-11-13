@@ -70,20 +70,24 @@ namespace ConsoleCommands
 	{
 		std::vector<std::string>* g_capture = nullptr;
 		bool                      g_redirecting = false;
+		bool                      g_silent = false;
 	}
 
-	Capture::Capture(bool a_redirecting) :
+	Capture::Capture(bool a_redirecting, bool a_silent) :
 		_previous(g_capture),
-		_previousRedirecting(g_redirecting)
+		_previousRedirecting(g_redirecting),
+		_previousSilent(g_silent)
 	{
 		g_capture = &_lines;
 		g_redirecting = a_redirecting;
+		g_silent = a_silent;
 	}
 
 	Capture::~Capture()
 	{
 		g_capture = _previous;
 		g_redirecting = _previousRedirecting;
+		g_silent = _previousSilent;
 	}
 
 	bool IsRedirecting()
@@ -102,6 +106,9 @@ namespace ConsoleCommands
 	{
 		if (g_capture) {
 			g_capture->emplace_back(a_line);
+		}
+		if (g_silent) {
+			return;
 		}
 		if (auto* console = RE::ConsoleLog::GetSingleton()) {
 			const std::string line{ a_line };

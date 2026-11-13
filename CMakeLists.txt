@@ -39,10 +39,22 @@ add_commonlibsse_plugin(${PROJECT_NAME}
 		src/Pipeline.cpp
 		src/Query.cpp
 		src/Redirect.cpp
+		src/TextTools.cpp
+		src/Variables.cpp
 		src/WhichPlugin.cpp
 )
+find_package(nlohmann_json CONFIG REQUIRED)
+target_link_libraries(${PROJECT_NAME} PRIVATE nlohmann_json::nlohmann_json)
 target_compile_features(${PROJECT_NAME} PRIVATE cxx_std_23)
 target_compile_definitions(${PROJECT_NAME} PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE
 	PLUGIN_VERSION_STRING="${PROJECT_VERSION}")
 target_precompile_headers(${PROJECT_NAME} PRIVATE include/PCH.h)
 target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
+# Unit tests for the parts that don't need the game (parser, pipe splitter, text tools).
+enable_testing()
+add_executable(wp_tests tests/tests.cpp src/Query.cpp src/Pipeline.cpp src/TextTools.cpp)
+target_compile_features(wp_tests PRIVATE cxx_std_23)
+target_precompile_headers(wp_tests PRIVATE tests/PCH.h)
+target_include_directories(wp_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+add_test(NAME wp_tests COMMAND wp_tests)

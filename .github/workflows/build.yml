@@ -32,6 +32,7 @@ jobs:
           cl 2>&1 | findstr /C:"Version"
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo "-DCMAKE_TOOLCHAIN_FILE=%VCPKG_INSTALLATION_ROOT%\scripts\buildsystems\vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows-static-md -DVCPKG_HOST_TRIPLET=x64-windows-static-md -DVCPKG_OVERLAY_TRIPLETS=triplets || exit /b 1
           cmake --build build || exit /b 1
+          ctest --test-dir build --output-on-failure || exit /b 1
           dumpbin /exports build\WhichPlugin.dll | findstr /C:"SKSEPlugin_Load" || exit /b 1
           dumpbin /exports build\WhichPlugin.dll | findstr /C:"SKSEPlugin_Version" || exit /b 1
 

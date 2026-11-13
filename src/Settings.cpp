@@ -124,5 +124,9 @@ namespace Settings
 		ini.Bool("Output", "bOverwriteNeedsConfirm", v.overwriteNeedsConfirm, a_problems);
 		ini.Bool("Open", "bAllowOpenFolders", v.allowOpenFolders, a_problems);
 		ini.Bool("Open", "bAllowOpenURL", v.allowOpenURL, a_problems);
+
+		ini.Count("Variables", "iMaxVariables", 0, 100000, v.maxVariables, a_problems);
+		ini.Count("Variables", "iMaxVariableLength", 1, 10000000, v.maxVariableLength, a_problems);
+		ini.Bool("Variables", "bAllowClipboardRead", v.allowClipboardRead, a_problems);
 	}
 }

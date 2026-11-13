@@ -7,6 +7,7 @@
 #include "Query.h"
 #include "Redirect.h"
 #include "Settings.h"
+#include "Variables.h"
 
 #include <regex>
 #include <unordered_map>
@@ -772,6 +773,7 @@ namespace WhichPlugin
 				line += std::format("  Name: \"{}\"", name);
 			}
 			Print(line);
+			Variables::SetLastRecord(a_form->GetFormID());
 
 			if (const auto edid = a_edids.Get(a_form); !edid.empty()) {
 				Print(std::format("    EditorID: {}", edid));
@@ -1014,11 +1016,18 @@ namespace WhichPlugin
 			Print("  >! name    replace the file even when bOverwriteNeedsConfirm is on");
 			Print("  >> name    append to that file;  >> alone appends to the last file used");
 			Print("  >>>        copy the output to the clipboard");
-			Print("  |          pipe into text tools (grep, sed, sort... coming soon)");
+			Print("  | tool     pass the output through text tools; -c or -d give clean lines, e.g.");
+			Print("             wp -c type=WEAP && name:sword | sort | head -5");
+			Print("             grep [-ivcnF] RE   sed [-n] 's/a/b/g; /re/d; 2,5p'   sort [-rnuf]   uniq [-cdi]");
+			Print("             head/tail [-n N]   wc [-lwc]   echo TEXT   cat [-n]");
 			Print("Actions:");
 			Print("  wp open          the output folder           wp open last   the last file written");
 			Print("  wp help --web    this help on GitHub         wp json        a JSON checker in the browser");
 			Print("  wp uesp WEAP     UESP's page on a record type (or give a form ID)");
+			Print("Variables:");
+			Print("  wp export NAME=value   wp unset NAME   wp env (list)   $NAME anywhere, e.g. wp base:$SELECTED");
+			Print("  $(wp -c ...) puts that command's output in the line; built-in: SELECTED CROSSHAIR PLAYER");
+			Print("  CELL WORLDSPACE LAST_RECORD LAST_FILE LAST_OUTPUT CLIPBOARD.  '...' and \\$ keep a $ as it is");
 			Print("  To search for plugins named like an action, quote it: wp \"open\"");
 			Print("Settings: Data\\SKSE\\Plugins\\WhichPlugin.ini");
 		}
@@ -1101,7 +1110,7 @@ namespace WhichPlugin
 
 		void Run(std::string_view a_args)
 		{
-			if (RunAction(a_args)) {
+			if (Variables::RunCommand(a_args) || RunAction(a_args)) {
 				return;
 			}
 

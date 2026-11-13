@@ -31,7 +31,8 @@ namespace ConsoleCommands
 	class Capture
 	{
 	public:
-		explicit Capture(bool a_redirecting);
+		// a_silent: record the lines without printing them to the console (for $(...)).
+		explicit Capture(bool a_redirecting, bool a_silent = false);
 		~Capture();
 		Capture(const Capture&) = delete;
 		Capture& operator=(const Capture&) = delete;
@@ -42,6 +43,7 @@ namespace ConsoleCommands
 		std::vector<std::string>  _lines;
 		std::vector<std::string>* _previous;
 		bool                      _previousRedirecting;
+		bool                      _previousSilent;
 	};
 
 	// The string argument of a command, or nullopt when the user gave none.

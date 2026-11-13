@@ -26,6 +26,11 @@ namespace Settings
 		// [Open]
 		bool allowOpenFolders{ true };  // bAllowOpenFolders: wp open, wp open last
 		bool allowOpenURL{ true };      // bAllowOpenURL: wp help --web, wp uesp, wp json
+
+		// [Variables]
+		std::size_t maxVariables{ 1000 };          // iMaxVariables: how many you can set
+		std::size_t maxVariableLength{ 100000 };   // iMaxVariableLength: characters in one value
+		bool        allowClipboardRead{ true };    // bAllowClipboardRead: $CLIPBOARD
 	};
 
 	const Values& Get();

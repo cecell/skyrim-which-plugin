@@ -57,11 +57,18 @@ Output (at the end of the line):
   >! name    replace the file even when bOverwriteNeedsConfirm is on
   >> name    append to that file;  >> alone appends to the last file used
   >>>        copy the output to the clipboard
-  |          pipe into text tools (grep, sed, sort... coming soon)
+  | tool     pass the output through text tools; -c or -d give clean lines, e.g.
+             wp -c type=WEAP && name:sword | sort | head -5
+             grep [-ivcnF] RE   sed [-n] 's/a/b/g; /re/d; 2,5p'   sort [-rnuf]   uniq [-cdi]
+             head/tail [-n N]   wc [-lwc]   echo TEXT   cat [-n]
 Actions:
   wp open          the output folder           wp open last   the last file written
   wp help --web    this help on GitHub         wp json        a JSON checker in the browser
   wp uesp WEAP     UESP's page on a record type (or give a form ID)
+Variables:
+  wp export NAME=value   wp unset NAME   wp env (list)   $NAME anywhere, e.g. wp base:$SELECTED
+  $(wp -c ...) puts that command's output in the line; built-in: SELECTED CROSSHAIR PLAYER
+  CELL WORLDSPACE LAST_RECORD LAST_FILE LAST_OUTPUT CLIPBOARD.  '...' and \$ keep a $ as it is
   To search for plugins named like an action, quote it: wp "open"
 Settings: Data\SKSE\Plugins\WhichPlugin.ini
 ```
@@ -78,6 +85,44 @@ Settings: Data\SKSE\Plugins\WhichPlugin.ini
 
 Developed and tested on Skyrim 1.6.1170. The DLL also targets other SE and AE versions, but they
 haven't been tested. VR isn't supported.
+
+## Variables
+
+```
+wp export SWORD=00012EB7        set a variable (kept between games)
+wp $SWORD                        use it anywhere in a line
+wp base:$SELECTED                the record behind the reference clicked in the console
+wp export IDS=$(wp -c refs:IronSword)   a command's output, lines joined by spaces
+wp env                           list your variables and the built-in ones
+wp unset SWORD                   remove one
+```
+
+Built in: `$SELECTED`, `$CROSSHAIR`, `$PLAYER`, `$CELL`, `$WORLDSPACE` (form IDs), `$LAST_RECORD` (the last
+record shown in detail), `$LAST_FILE`, `$LAST_OUTPUT` and `$CLIPBOARD`. Inside `'...'`, and as `\$`, a `$`
+stays as it is. Your variables are saved in `Documents\My Games\Skyrim Special Edition\wp\vars.json`.
+
+## Pipes
+
+`|` passes the output through text tools, which see every result, not only the lines the console shows.
+Use `-c` or `-d` to get one clean line per result:
+
+```
+wp -c type=WEAP && name:sword | sort | head -5
+wp -d contents:LItemWeaponSword | grep -i daedric | wc -l
+wp -c type=ARMO | sed 's/^/player.additem /; s/$/ 1/' > give.txt
+```
+
+| Tool | Options |
+|---|---|
+| `grep PATTERN` | `-i` ignore case, `-v` non-matching lines, `-c` count, `-n` line numbers, `-F` plain text |
+| `sed 'SCRIPT'` | `s/re/new/` with `g`, `i`, `p`; `d`; `p`; addresses `N`, `$`, `/re/`, `A,B`; `;` between commands; `-n` |
+| `sort` | `-r` reverse, `-n` numbers, `-u` unique, `-f` ignore case |
+| `uniq` | `-c` count, `-d` only repeated lines, `-i` ignore case |
+| `head`, `tail` | `-n N` or `-N` (10 by default) |
+| `wc` | `-l` lines, `-w` words, `-c` characters |
+| `echo TEXT`, `cat` | `cat -n` numbers the lines |
+
+Patterns are regular expressions in the JavaScript style.
 
 ## Installing
 
@@ -100,6 +145,9 @@ settings file `WhichPlugin.ini` and a `WhichPlugin` folder with the licences. Th
 | `bOverwriteNeedsConfirm` | `0` | `1`: `>` won't replace an existing file; `>!` does |
 | `bAllowOpenFolders` | `1` | `wp open` and `wp open last` |
 | `bAllowOpenURL` | `1` | `wp help --web`, `wp uesp` and `wp json` |
+| `iMaxVariables` | `1000` | How many variables `wp export` can set |
+| `iMaxVariableLength` | `100000` | Characters in one variable's value |
+| `bAllowClipboardRead` | `1` | `$CLIPBOARD` gives the clipboard's text |
 
 Output files go to `Documents\My Games\Skyrim Special Edition\wp`, and only text file types can be
 written.

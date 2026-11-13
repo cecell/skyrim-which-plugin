@@ -12,7 +12,8 @@
 //   value := "double quoted"  (taken literally; plugin names can't contain ")
 //          | 'single quoted'  (\' is a literal apostrophe)
 //          | bare text        (up to the next && or ||, trimmed)
-//   field := plugin-name | plugin-master | lobytes | formid | edid | type | keyword
+//   field := plugin-name | plugin-master | lobytes | formid | edid | name | type | keyword
+//            | refs | base | contents
 //            (none = guess: plugin name or slot)
 //            regex: is shorthand for plugin-name~
 namespace Query
@@ -27,6 +28,11 @@ namespace Query
 		EditorId,
 		Type,     // record type signature: WEAP, NPC_, ...
 		Keyword,  // has a keyword, given by form ID or editor ID (~: any keyword whose editor ID matches)
+		Name,     // the in-game display name (references: their base record's)
+		// The next three name records by form ID or editor ID (~: every record whose editor ID matches).
+		Refs,      // references placed from that base record
+		Base,      // the base record of that reference
+		Contents,  // entries of that leveled list or form list, nested lists included
 	};
 
 	enum class Match
@@ -57,6 +63,7 @@ namespace Query
 
 	std::string_view FieldName(Field a_field);
 	bool             IsRecordField(Field a_field);
+	bool             IsLookupField(Field a_field);  // refs, base, contents
 
 	// Hex helpers shared with the command.
 	bool                         IsHex(std::string_view a_text);

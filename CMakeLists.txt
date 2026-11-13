@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 # The one place for the version; the release workflow reads it from this line.
-project(WhichPlugin VERSION 0.90 LANGUAGES CXX)
+project(WhichPlugin VERSION 0.91 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

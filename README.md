@@ -16,6 +16,9 @@ wp 00012EB7                            which plugin owns a form ID; master, last
 wp edid~"^Iron.*Sword$"                records whose editor ID matches a regex
 wp type=WEAP && plugin-name:dawn       weapons last edited by a plugin with "dawn" in its name
 wp type=SPEL && !plugin-name~"."       spells no plugin lists (made at runtime)
+wp name:"iron sword"                   records by in-game name, no editor IDs needed
+wp refs:IronSword                      iron swords placed in the loaded cells
+wp contents:LItemWeaponSword           what a leveled list can give, nested lists too
 wp -d keyword:WeapTypeSword > swords   one aligned row each, written to a file
 ```
 
@@ -24,7 +27,7 @@ wp -d keyword:WeapTypeSword > swords   one aligned row each, written to a file
 This is what `wp help` prints in the console:
 
 ```
-WhichPlugin (wp) v0.90 - find loaded plugins, load-order slots and records
+WhichPlugin (wp) v0.91 - find loaded plugins, load-order slots and records
   wp                              list every loaded plugin
   wp patch                        plugin name contains, or slot starts with (if hex)
   wp FE                           light plugins + names containing "fe"
@@ -38,7 +41,12 @@ Fields and how they match  (: contains   = exact   ~ regex):
   edid:iron   edid=IronSword   edid~"^Iron.*Sword$"
   type=WEAP   type~"^(ARMO|WEAP)$"   record type
   keyword:WeapTypeSword   keyword:0001E711   keyword~"^WeapType"
-Using formid, edid, type or keyword searches records; plugin fields then filter them.
+  name:"iron sword"   name~"^Daedric"   in-game name (works without editor IDs)
+  refs:IronSword                  placed references of a record (loaded cells only)
+  base:00000014                   the base record of a reference (14 = the player)
+  contents:LItemWeaponSword       what a leveled list or form list holds, nested lists too
+Using formid, edid, name, type, keyword, refs, base or contents searches records;
+  plugin fields then filter them.
   e.g. wp edid~"^Iron" && plugin-master:dawnguard
 Options (first on the line):  -c/--concise  -d/--detail  -l/--lo-agnostic  --int   (-- ends options)
   -c  IDs only      -d  one aligned row each      -l  0x00E8F0, "Dawnguard.esm"      --int  decimal

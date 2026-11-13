@@ -69,6 +69,19 @@ namespace WhichPlugin
 			return std::format("{:02X}", top);
 		}
 
+		// The in-game name. A reference has none of its own: it shows its base record's.
+		std::string NameOf(const RE::TESForm* a_form)
+		{
+			const auto* ref = a_form->AsReference();
+			const auto* name = ref ? ref->GetName() : a_form->GetName();
+			return name ? name : "";
+		}
+
+		bool IsList(const RE::TESForm* a_form)
+		{
+			return a_form->As<RE::TESLeveledList>() || a_form->Is(RE::FormType::FormList);
+		}
+
 		// ---------- editor IDs ----------
 
 		// GetFormEditorID() covers everything when po3's Tweaks is installed; otherwise fall back to
@@ -156,7 +169,8 @@ namespace WhichPlugin
 				       (LooksLikeSlot(term->value) && LoadOrder::SlotHex(a_file).starts_with(Upper(term->value)));
 			}
 
-			std::vector<const RE::BGSKeyword*> keywords;  // keyword terms: the keywords it refers to
+			std::vector<const RE::BGSKeyword*>     keywords;  // keyword terms: the keywords it refers to
+			std::unordered_set<const RE::TESForm*> targets;   // refs/base/contents terms: see ResolveTargets
 		};
 
 		// The keywords a keyword term refers to. ':' and '=' name one keyword by form ID or editor ID;
@@ -201,16 +215,124 @@ namespace WhichPlugin
 			return out;
 		}
 
+		// What a refs:, base: or contents: term compares records against. ':' and '=' name one record by
+		// form ID or editor ID, '~' every record whose editor ID matches. The result is
+		//   refs:      those base records (a reference matches if its base is one of them),
+		//   base:      the base records of those references,
+		//   contents:  every entry of those leveled lists and form lists, nested lists and their
+		//              entries included.
+		// Candidates come from the game's form-ID table (live forms only). Empty result: a_error says why.
+		std::unordered_set<const RE::TESForm*> ResolveTargets(const Term& a_term, EditorIds& a_edids, std::string& a_error)
+		{
+			const auto fits = [&](const RE::TESForm* a_form) {
+				switch (a_term.field) {
+				case Field::Refs:
+					return a_form->AsReference() == nullptr;
+				case Field::Base:
+					return a_form->AsReference() != nullptr;
+				default:
+					return IsList(a_form);
+				}
+			};
+			const auto* what = a_term.field == Field::Refs ? "base record" : a_term.field == Field::Base ? "reference" : "leveled list or form list";
+
+			std::vector<const RE::TESForm*> named;
+			const auto                      digits = Query::StripHexPrefix(a_term.value);
+			if (a_term.match != Match::Regex && Query::IsHex(digits) && digits.size() <= 8) {
+				if (const auto* form = RE::TESForm::LookupByID(Query::ParseHex(digits).value_or(0)); form && fits(form)) {
+					named.push_back(form);
+				}
+			}
+			if (named.empty()) {
+				std::optional<std::regex> re;
+				if (a_term.match == Match::Regex) {
+					re.emplace(a_term.value, std::regex::ECMAScript | std::regex::icase);
+				}
+				const auto  wanted = Lower(a_term.value);
+				const auto& [map, lock] = RE::TESForm::GetAllForms();
+				const RE::BSReadLockGuard guard{ lock };
+				if (map) {
+					for (const auto& [id, form] : *map) {
+						if (!form || !fits(form)) {
+							continue;
+						}
+						const auto edid = a_edids.Get(form);
+						if (!edid.empty() && (re ? std::regex_search(edid, *re) : Lower(edid) == wanted)) {
+							named.push_back(form);
+						}
+					}
+				}
+			}
+
+			std::unordered_set<const RE::TESForm*> out;
+			if (named.empty()) {
+				a_error = a_term.match == Match::Regex ?
+				              std::format("{} - no {}'s editor ID matches", a_term.source, what) :
+				              std::format("{} - no {} has that form ID or editor ID", a_term.source, what);
+				return out;
+			}
+			switch (a_term.field) {
+			case Field::Refs:
+				out.insert(named.begin(), named.end());
+				break;
+			case Field::Base:
+				for (const auto* ref : named) {
+					if (const auto* base = ref->AsReference()->GetBaseObject()) {
+						out.insert(base);
+					}
+				}
+				break;
+			default:
+				{
+					std::vector<const RE::TESForm*>        pending(named.begin(), named.end());
+					std::unordered_set<const RE::TESForm*> opened;  // lists can contain each other
+					const auto                             add = [&](const RE::TESForm* a_entry) {
+                        if (a_entry) {
+                            out.insert(a_entry);
+                            if (IsList(a_entry)) {
+                                pending.push_back(a_entry);
+                            }
+                        }
+					};
+					while (!pending.empty()) {
+						const auto* list = pending.back();
+						pending.pop_back();
+						if (!opened.insert(list).second) {
+							continue;
+						}
+						if (const auto* leveled = list->As<RE::TESLeveledList>()) {
+							for (const auto& entry : leveled->entries) {
+								add(entry.form);
+							}
+						} else if (const auto* formList = list->As<RE::BGSListForm>()) {
+							for (const auto* entry : formList->forms) {
+								add(entry);
+							}
+							if (formList->scriptAddedTempForms) {
+								for (const auto id : *formList->scriptAddedTempForms) {
+									add(RE::TESForm::LookupByID(id));
+								}
+							}
+						}
+					}
+					break;
+				}
+			}
+			return out;
+		}
+
 		std::vector<std::vector<Matcher>> BuildMatchers(const std::vector<std::vector<Term>>& a_groups, EditorIds& a_edids)
 		{
 			std::vector<std::vector<Matcher>> out;
 			for (const auto& group : a_groups) {
 				auto& g = out.emplace_back();
 				for (const auto& t : group) {
-					auto& m = g.emplace_back(t);
+					auto&       m = g.emplace_back(t);
+					std::string unused;
 					if (t.field == Field::Keyword) {
-						std::string unused;
 						m.keywords = ResolveKeywords(t, a_edids, unused);
+					} else if (Query::IsLookupField(t.field)) {
+						m.targets = ResolveTargets(t, a_edids, unused);
 					}
 				}
 			}
@@ -270,6 +392,18 @@ namespace WhichPlugin
 					hit = std::ranges::any_of(a_m.keywords, [&](const RE::BGSKeyword* kw) { return kf->HasKeyword(kw); });
 				}
 				break;
+			case Field::Name:
+				hit = a_m.Test(NameOf(a_form));
+				break;
+			case Field::Refs:
+				if (const auto* ref = a_form->AsReference()) {
+					hit = a_m.targets.contains(ref->GetBaseObject());
+				}
+				break;
+			case Field::Base:
+			case Field::Contents:
+				hit = a_m.targets.contains(a_form);
+				break;
 			default:
 				hit = a_m.TestAny(last);
 				break;
@@ -307,6 +441,24 @@ namespace WhichPlugin
 					const auto what = a_term.match == Match::Regex ?
 					                      std::format("has a keyword whose editor ID matches /{}/", v) :
 					                      std::format("has keyword {}", v);
+					return a_term.negated ? std::format("NOT ({})", what) : what;
+				}
+			case Field::Name:
+				subject = "in-game name";
+				break;
+			case Field::Refs:
+			case Field::Base:
+			case Field::Contents:
+				{
+					const bool  regex = a_term.match == Match::Regex;
+					std::string what;
+					if (a_term.field == Field::Refs) {
+						what = regex ? std::format("is a reference to a record whose editor ID matches /{}/", v) : std::format("is a reference to {}", v);
+					} else if (a_term.field == Field::Base) {
+						what = regex ? std::format("is the base record of a reference whose editor ID matches /{}/", v) : std::format("is the base record of reference {}", v);
+					} else {
+						what = regex ? std::format("is in a list whose editor ID matches /{}/ (nested lists included)", v) : std::format("is in list {} (nested lists included)", v);
+					}
 					return a_term.negated ? std::format("NOT ({})", what) : what;
 				}
 			default:
@@ -614,7 +766,7 @@ namespace WhichPlugin
 		void PrintFormDetails(RE::TESForm* a_form, EditorIds& a_edids)
 		{
 			std::string line = std::format("    Record: {} {:08X}", RE::FormTypeToString(a_form->GetFormType()), a_form->GetFormID());
-			if (const auto* name = a_form->GetName(); name && *name) {
+			if (const auto name = NameOf(a_form); !name.empty()) {
 				line += std::format("  Name: \"{}\"", name);
 			}
 			Print(line);
@@ -628,6 +780,25 @@ namespace WhichPlugin
 			const auto id = a_form->GetFormID();
 			if ((id >> 24) != 0xFF && LoadOrder::ForFormId(id)) {
 				Print(std::format("    LO-agnostic: {}   (as int: {})", IdText(id, { .loAgnostic = true }), IdText(id, { .loAgnostic = true, .asInt = true })));
+			}
+
+			// "TYPE 00012345 EditorID "Name"", for the records a reference points at.
+			const auto label = [&](const RE::TESForm* a_other) {
+				const auto edid = a_edids.Get(a_other);
+				const auto name = NameOf(a_other);
+				return std::format("{} {:08X}{}{}", RE::FormTypeToString(a_other->GetFormType()), a_other->GetFormID(),
+					edid.empty() ? "" : " " + edid, name.empty() ? "" : std::format(" \"{}\"", name));
+			};
+			if (const auto* ref = a_form->AsReference()) {
+				if (const auto* base = ref->GetBaseObject()) {
+					Print(std::format("    Base: {}", label(base)));
+				}
+				if (const auto* cell = ref->GetParentCell()) {
+					Print(std::format("    Cell: {} ({}){}", label(cell), cell->IsInteriorCell() ? "interior" : "exterior",
+						a_form->IsDisabled() ? "  - this reference is disabled" : ""));
+				}
+				const auto pos = ref->GetPosition();
+				Print(std::format("    Position: {:.0f}, {:.0f}, {:.0f}", pos.x, pos.y, pos.z));
 			}
 
 			if (const auto* kf = a_form->As<RE::BGSKeywordForm>(); kf && kf->GetNumKeywords() > 0) {
@@ -686,12 +857,6 @@ namespace WhichPlugin
 			return std::ranges::any_of(a_group, [&](const Term& t) {
 				return t.field == a_field && !t.negated && (a_allowRegex || t.match != Match::Regex);
 			});
-		}
-
-		std::string NameOf(const RE::TESForm* a_form)
-		{
-			const auto* name = a_form->GetName();
-			return name ? name : "";
 		}
 
 		std::string FileText(const RE::TESFile* a_file)
@@ -782,12 +947,24 @@ namespace WhichPlugin
 			}
 			std::ranges::sort(results, {}, [](const RE::TESForm* f) { return f->GetFormID(); });
 
+			// Only references in memory exist to be found; say so whenever a search asks for them.
+			const bool refsNote = chatty && std::ranges::any_of(std::views::join(a_groups), [](const Term& t) { return t.field == Field::Refs && !t.negated; });
+			const auto printRefsNote = [&] {
+				if (refsNote) {
+					Print("  Only references in memory are searched: the loaded cells and persistent references.");
+				}
+			};
+
 			if (results.empty()) {
 				Print("  No records match");
 				if (chatty && std::ranges::any_of(a_groups, [](const auto& g) { return GroupHasPositive(g, Field::EditorId, true); })) {
 					PrintEditorIdNote();
 				}
+				printRefsNote();
 				return;
+			}
+			if (results.size() > 1 || a_opts.layout != Layout::Default) {
+				printRefsNote();
 			}
 			if (results.size() == 1 && a_opts.layout == Layout::Default) {
 				Print("  1 record matches:");
@@ -820,7 +997,12 @@ namespace WhichPlugin
 			Print("  edid:iron   edid=IronSword   edid~\"^Iron.*Sword$\"");
 			Print("  type=WEAP   type~\"^(ARMO|WEAP)$\"   record type");
 			Print("  keyword:WeapTypeSword   keyword:0001E711   keyword~\"^WeapType\"");
-			Print("Using formid, edid, type or keyword searches records; plugin fields then filter them.");
+			Print("  name:\"iron sword\"   name~\"^Daedric\"   in-game name (works without editor IDs)");
+			Print("  refs:IronSword                  placed references of a record (loaded cells only)");
+			Print("  base:00000014                   the base record of a reference (14 = the player)");
+			Print("  contents:LItemWeaponSword       what a leveled list or form list holds, nested lists too");
+			Print("Using formid, edid, name, type, keyword, refs, base or contents searches records;");
+			Print("  plugin fields then filter them.");
 			Print("  e.g. wp edid~\"^Iron\" && plugin-master:dawnguard");
 			Print("Options (first on the line):  -c/--concise  -d/--detail  -l/--lo-agnostic  --int   (-- ends options)");
 			Print("  -c  IDs only      -d  one aligned row each      -l  0x00E8F0, \"Dawnguard.esm\"      --int  decimal");
@@ -894,17 +1076,20 @@ namespace WhichPlugin
 				}
 			}
 
-			// Keyword terms must name keywords that exist; say so before searching.
+			// Keyword, refs, base and contents terms must name records that exist; say so before searching.
 			{
 				EditorIds edids;
 				bool      bad = false;
 				for (const auto& t : std::views::join(parsed.groups)) {
+					std::string error;
 					if (t.field == Field::Keyword) {
-						std::string error;
-						if (ResolveKeywords(t, edids, error).empty()) {
-							Print(std::format("  Error: {}", error));
-							bad = true;
-						}
+						ResolveKeywords(t, edids, error);
+					} else if (Query::IsLookupField(t.field)) {
+						ResolveTargets(t, edids, error);
+					}
+					if (!error.empty()) {
+						Print(std::format("  Error: {}", error));
+						bad = true;
 					}
 				}
 				if (bad) {

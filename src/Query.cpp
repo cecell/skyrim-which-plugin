@@ -20,6 +20,10 @@ namespace Query
 			FieldWord{ "edid"sv, Field::EditorId },
 			FieldWord{ "type"sv, Field::Type },
 			FieldWord{ "keyword"sv, Field::Keyword },
+			FieldWord{ "name"sv, Field::Name },
+			FieldWord{ "refs"sv, Field::Refs },
+			FieldWord{ "base"sv, Field::Base },
+			FieldWord{ "contents"sv, Field::Contents },
 		};
 
 		// Characters Windows forbids in file names (so they can never be in a plugin name).
@@ -247,7 +251,7 @@ namespace Query
 					return;
 				} else {
 					a_out.errors.push_back(std::format(
-						"{} - unknown field '{}'. Use plugin-name, plugin-master, lobytes, formid, edid, type or keyword (quote the text if it isn't a field)",
+						"{} - unknown field '{}'. Use plugin-name, plugin-master, lobytes, formid, edid, name, type, keyword, refs, base or contents (quote the text if it isn't a field)",
 						source, rest.substr(0, wordEnd)));
 					return;
 				}
@@ -300,6 +304,14 @@ namespace Query
 			return "type";
 		case Field::Keyword:
 			return "keyword";
+		case Field::Name:
+			return "name";
+		case Field::Refs:
+			return "refs";
+		case Field::Base:
+			return "base";
+		case Field::Contents:
+			return "contents";
 		default:
 			return "any";
 		}
@@ -307,7 +319,24 @@ namespace Query
 
 	bool IsRecordField(Field a_field)
 	{
-		return a_field == Field::FormId || a_field == Field::EditorId || a_field == Field::Type || a_field == Field::Keyword;
+		switch (a_field) {
+		case Field::FormId:
+		case Field::EditorId:
+		case Field::Type:
+		case Field::Keyword:
+		case Field::Name:
+		case Field::Refs:
+		case Field::Base:
+		case Field::Contents:
+			return true;
+		default:
+			return false;
+		}
+	}
+
+	bool IsLookupField(Field a_field)
+	{
+		return a_field == Field::Refs || a_field == Field::Base || a_field == Field::Contents;
 	}
 
 	bool IsHex(std::string_view a_text)

@@ -21,6 +21,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: Check the README matches wp help
+        run: python tools/sync_readme_help.py --check
+
       - name: Build and test
         shell: cmd
         run: |

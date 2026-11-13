@@ -3,7 +3,10 @@
 #include "ConsoleCommands.h"
 #include "ConsoleHook.h"
 #include "LoadOrder.h"
+#include "Open.h"
 #include "Query.h"
+#include "Redirect.h"
+#include "Settings.h"
 
 #include <regex>
 #include <unordered_map>
@@ -14,8 +17,10 @@ namespace WhichPlugin
 	namespace
 	{
 		constexpr auto        LONG_NAME = "WhichPlugin";
-		constexpr auto        SHORT_NAME = "wp";
-		constexpr std::size_t kConsoleCap = 100;  // records shown in the console; redirects get all
+		constexpr auto README_URL = "https://github.com/cecell/skyrim-which-plugin#readme";
+
+		// Result lines shown in the console (iMaxConsoleLines); a redirect gets all of them.
+		std::size_t ConsoleCap() { return Settings::Get().maxConsoleLines; }
 
 		using ConsoleCommands::Print;
 		using Query::Field;
@@ -506,12 +511,9 @@ namespace WhichPlugin
 
 		// ---------- options ----------
 
-		enum class Layout
-		{
-			Default,
-			Concise,  // -c: just the IDs (records) or file names (plugins), nothing else
-			Detail,   // -d: one aligned row per result, like `ls -l`
-		};
+		// Default, Concise (-c: just the IDs or file names) or Detail (-d: one aligned row per result,
+		// like `ls -l`). The default comes from sDefaultLayout.
+		using Layout = Settings::Layout;
 
 		struct Options
 		{
@@ -618,12 +620,12 @@ namespace WhichPlugin
 			return a_opts.asInt ? std::format("{}", a_id) : FormIdText(a_id);
 		}
 
-		// Prints result lines: the first kConsoleCap in the console; with a redirect, every line goes to it.
+		// Prints result lines: the first ConsoleCap() in the console; with a redirect, every line goes to it.
 		void EmitCapped(const std::vector<std::string>& a_lines)
 		{
 			const bool redirecting = ConsoleCommands::IsRedirecting();
 			for (std::size_t i = 0; i < a_lines.size(); ++i) {
-				if (i < kConsoleCap) {
+				if (i < ConsoleCap()) {
 					Print(a_lines[i]);
 				} else if (redirecting) {
 					ConsoleCommands::PrintRedirectOnly(a_lines[i]);
@@ -635,10 +637,10 @@ namespace WhichPlugin
 
 		void PrintCapNote(std::size_t a_total, std::string_view a_what)
 		{
-			if (a_total > kConsoleCap && !ConsoleCommands::IsRedirecting()) {
-				Print(std::format("  {} {} match; showing the first {}. Add > name to save them all to a file.", a_total, a_what, kConsoleCap));
-			} else if (a_total > kConsoleCap) {
-				Print(std::format("  {} {} match; the first {} are shown here, all of them are in the output.", a_total, a_what, kConsoleCap));
+			if (a_total > ConsoleCap() && !ConsoleCommands::IsRedirecting()) {
+				Print(std::format("  {} {} match; showing the first {}. Add > name to save them all to a file.", a_total, a_what, ConsoleCap()));
+			} else if (a_total > ConsoleCap()) {
+				Print(std::format("  {} {} match; the first {} are shown here, all of them are in the output.", a_total, a_what, ConsoleCap()));
 			}
 		}
 
@@ -867,7 +869,7 @@ namespace WhichPlugin
 		void PrintRecords(const std::vector<RE::TESForm*>& a_forms, EditorIds& a_edids, const Options& a_opts)
 		{
 			// Only build as many lines as will be shown (all of them when redirecting).
-			const auto count = ConsoleCommands::IsRedirecting() ? a_forms.size() : std::min(a_forms.size(), kConsoleCap);
+			const auto count = ConsoleCommands::IsRedirecting() ? a_forms.size() : std::min(a_forms.size(), ConsoleCap());
 
 			std::vector<std::string> lines;
 			if (a_opts.layout == Layout::Detail) {
@@ -974,7 +976,7 @@ namespace WhichPlugin
 
 			PrintRecords(results, edids, a_opts);
 			PrintCapNote(results.size(), "records");
-			if (chatty && results.size() <= kConsoleCap) {
+			if (chatty && results.size() <= ConsoleCap()) {
 				Print(std::format("  {} records match", results.size()));
 			}
 		}
@@ -1008,15 +1010,102 @@ namespace WhichPlugin
 			Print("  -c  IDs only      -d  one aligned row each      -l  0x00E8F0, \"Dawnguard.esm\"      --int  decimal");
 			Print("Quotes: \"...\" is taken literally. In '...' write \\' for an apostrophe.");
 			Print("Output (at the end of the line):");
-			Print("  > name     write to My Games\\Skyrim Special Edition\\name(.txt), replacing it");
+			Print("  > name     write to My Games\\Skyrim Special Edition\\wp\\name(.txt), text file types only");
+			Print("  >! name    replace the file even when bOverwriteNeedsConfirm is on");
 			Print("  >> name    append to that file;  >> alone appends to the last file used");
 			Print("  >>>        copy the output to the clipboard");
 			Print("  |          pipe into text tools (grep, sed, sort... coming soon)");
+			Print("Actions:");
+			Print("  wp open          the output folder           wp open last   the last file written");
+			Print("  wp help --web    this help on GitHub         wp json        a JSON checker in the browser");
+			Print("  wp uesp WEAP     UESP's page on a record type (or give a form ID)");
+			Print("  To search for plugins named like an action, quote it: wp \"open\"");
+			Print("Settings: Data\\SKSE\\Plugins\\WhichPlugin.ini");
+		}
+
+		// wp open, wp open last, wp help --web, wp json, wp uesp. Returns false if a_args isn't an
+		// action (quoted words never are, so wp "open" still searches).
+		bool RunAction(std::string_view a_args)
+		{
+			std::vector<std::string> words;
+			for (const auto word : std::views::split(a_args, ' ')) {
+				if (!word.empty()) {
+					words.emplace_back(Lower(std::string_view{ word.begin(), word.end() }));
+				}
+			}
+			if (words.empty()) {
+				return false;
+			}
+			const auto& action = words[0];
+			const auto  report = [](std::string_view a_what, const std::string& a_error) {
+                Print(a_error.empty() ? std::format("  Opened {}", a_what) : std::format("  Couldn't open {}: {}", a_what, a_error));
+			};
+			const auto url = [&](std::string_view a_what, const std::string& a_url) {
+				if (!Settings::Get().allowOpenURL) {
+					Print("  Opening web pages is off (bAllowOpenURL in WhichPlugin.ini)");
+				} else {
+					report(a_what, Open::Url(a_url));
+				}
+			};
+
+			if (action == "help" && words.size() == 2 && (words[1] == "--web" || words[1] == "web")) {
+				url(README_URL, README_URL);
+				return true;
+			}
+			if (action == "json" && words.size() == 1) {
+				url("the JSON checker", "https://jsonlint.com/");
+				return true;
+			}
+			if (action == "uesp" && words.size() <= 2) {
+				std::string type;
+				if (words.size() == 2) {
+					const auto digits = Query::StripHexPrefix(words[1]);
+					const auto* form = Query::IsHex(digits) && digits.size() <= 8 ? RE::TESForm::LookupByID(Query::ParseHex(digits).value_or(0)) : nullptr;
+					type = form ? std::string{ RE::FormTypeToString(form->GetFormType()) } : Upper(words[1]);
+					if (type.size() != 4 || !std::ranges::all_of(type, [](unsigned char c) { return std::isalnum(c) || c == '_'; })) {
+						Print(std::format("  {} isn't a record type (like WEAP or NPC_) or the form ID of a loaded record", words[1]));
+						return true;
+					}
+				}
+				const auto page = std::format("https://en.uesp.net/wiki/Skyrim_Mod:Mod_File_Format{}", type.empty() ? "" : "/" + type);
+				url(page, page);
+				return true;
+			}
+			if (action == "open" && words.size() <= 2) {
+				if (!Settings::Get().allowOpenFolders) {
+					Print("  Opening folders and files is off (bAllowOpenFolders in WhichPlugin.ini)");
+					return true;
+				}
+				if (words.size() == 1) {
+					if (const auto folder = Redirect::OutputFolder()) {
+						report(folder->string(), Open::Folder(*folder));
+					} else {
+						Print("  Couldn't find the My Games\\Skyrim Special Edition folder");
+					}
+				} else if (words[1] == "last") {
+					const auto& last = Redirect::LastFile();
+					if (last.empty()) {
+						Print("  No file has been written yet this session (e.g. wp patch > patches)");
+					} else if (!Redirect::AllowedExtension(last)) {
+						Print(std::format("  {} isn't a text file, so it isn't opened", last.string()));
+					} else {
+						report(last.string(), Open::File(last));
+					}
+				} else {
+					Print("  wp open: the output folder;  wp open last: the last file written.  To search for plugins named \"open\", type wp \"open\"");
+				}
+				return true;
+			}
+			return false;
 		}
 
 		void Run(std::string_view a_args)
 		{
-			Options     opts;
+			if (RunAction(a_args)) {
+				return;
+			}
+
+			Options     opts{ .layout = Settings::Get().defaultLayout };
 			std::string optionError;
 			const auto  query = ParseOptions(a_args, opts, optionError);
 			if (!optionError.empty()) {
@@ -1116,14 +1205,14 @@ namespace WhichPlugin
 
 	void Register()
 	{
-		ConsoleHook::AddCommand(LONG_NAME, SHORT_NAME, &Run);
+		ConsoleHook::AddCommand(LONG_NAME, Settings::Get().shortCommand, &Run);
 
 		static RE::SCRIPT_PARAMETER params[] = {
 			{ "Search (wp help for syntax)", RE::SCRIPT_PARAM_TYPE::kChar, true },
 		};
 		ConsoleCommands::Register({
 			.longName = LONG_NAME,
-			.shortName = SHORT_NAME,
+			.shortName = Settings::Get().shortCommand.c_str(),
 			.help = "Find loaded plugins, load-order slots and records. Type: wp help",
 			.params = params,
 			.numParams = static_cast<std::uint16_t>(std::size(params)),

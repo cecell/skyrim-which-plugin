@@ -20,6 +20,7 @@ wp name:"iron sword"                   records by in-game name, no editor IDs ne
 wp refs:IronSword                      iron swords placed in the loaded cells
 wp contents:LItemWeaponSword           what a leveled list can give, nested lists too
 wp -d keyword:WeapTypeSword > swords   one aligned row each, written to a file
+wp open last                           open that file
 ```
 
 ## Full syntax
@@ -52,10 +53,17 @@ Options (first on the line):  -c/--concise  -d/--detail  -l/--lo-agnostic  --int
   -c  IDs only      -d  one aligned row each      -l  0x00E8F0, "Dawnguard.esm"      --int  decimal
 Quotes: "..." is taken literally. In '...' write \' for an apostrophe.
 Output (at the end of the line):
-  > name     write to My Games\Skyrim Special Edition\name(.txt), replacing it
+  > name     write to My Games\Skyrim Special Edition\wp\name(.txt), text file types only
+  >! name    replace the file even when bOverwriteNeedsConfirm is on
   >> name    append to that file;  >> alone appends to the last file used
   >>>        copy the output to the clipboard
   |          pipe into text tools (grep, sed, sort... coming soon)
+Actions:
+  wp open          the output folder           wp open last   the last file written
+  wp help --web    this help on GitHub         wp json        a JSON checker in the browser
+  wp uesp WEAP     UESP's page on a record type (or give a form ID)
+  To search for plugins named like an action, quote it: wp "open"
+Settings: Data\SKSE\Plugins\WhichPlugin.ini
 ```
 
 `wp` also works in bat files run with `bat`, and alongside Console Command Extender.
@@ -74,9 +82,27 @@ haven't been tested. VR isn't supported.
 ## Installing
 
 Install the release zip with a mod manager, or copy its `SKSE` folder into the game's `Data` folder.
-It holds `SKSE/Plugins/WhichPlugin.dll`, its `.pdb` (so crash loggers can name functions) and a
-`WhichPlugin` folder with the licences. There is no plugin file. The log is
+It holds `SKSE/Plugins/WhichPlugin.dll`, its `.pdb` (so crash loggers can name functions), the
+settings file `WhichPlugin.ini` and a `WhichPlugin` folder with the licences. There is no plugin file. The log is
 `Documents\My Games\Skyrim Special Edition\SKSE\WhichPlugin.log`.
+
+## Settings
+
+`Data\SKSE\Plugins\WhichPlugin.ini` ([the default](config/WhichPlugin.ini)) is read when the game starts:
+
+| Setting | Default | What it does |
+|---|---|---|
+| `sShortCommand` | `wp` | The short console command, if another mod already uses `wp`. `WhichPlugin` always works |
+| `sLogLevel` | `info` | How much goes into `WhichPlugin.log` |
+| `iMaxConsoleLines` | `100` | Result lines the console shows. Saving to a file gets every line |
+| `sDefaultLayout` | `normal` | `normal`, `concise` (like `-c`) or `detail` (like `-d`) |
+| `bWriteFileAnywhere` | `0` | `1` allows full paths and `..` after `>` |
+| `bOverwriteNeedsConfirm` | `0` | `1`: `>` won't replace an existing file; `>!` does |
+| `bAllowOpenFolders` | `1` | `wp open` and `wp open last` |
+| `bAllowOpenURL` | `1` | `wp help --web`, `wp uesp` and `wp json` |
+
+Output files go to `Documents\My Games\Skyrim Special Edition\wp`, and only text file types can be
+written.
 
 ## Building
 

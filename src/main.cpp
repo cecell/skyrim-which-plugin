@@ -1,4 +1,5 @@
 #include "ConsoleHook.h"
+#include "Settings.h"
 #include "WhichPlugin.h"
 
 namespace
@@ -21,9 +22,16 @@ namespace
 
 SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 {
+	// The settings come first: they set the log level.
+	std::vector<std::string> problems;
+	Settings::Load(problems);
+
 	// CommonLib opens Documents\My Games\Skyrim Special Edition\SKSE\WhichPlugin.log itself.
-	SKSE::Init(a_skse, { .trampoline = true, .trampolineSize = 64 });
+	SKSE::Init(a_skse, { .logLevel = Settings::Get().logLevel, .trampoline = true, .trampolineSize = 64 });
 	SKSE::log::info("WhichPlugin loaded, game version {}", REL::Module::get().version().string());
+	for (const auto& problem : problems) {
+		SKSE::log::warn("WhichPlugin.ini: {}", problem);
+	}
 
 	if (!SKSE::GetMessagingInterface()->RegisterListener(OnMessage)) {
 		SKSE::log::critical("Failed to register the SKSE message listener");

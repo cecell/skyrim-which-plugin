@@ -74,7 +74,7 @@ jobs:
           # instead of landing in Data.
           $plugins = New-Item -ItemType Directory -Force stage/SKSE/Plugins
           $docs = New-Item -ItemType Directory -Force stage/SKSE/Plugins/WhichPlugin/licenses
-          Copy-Item build\WhichPlugin.dll, build\WhichPlugin.pdb $plugins
+          Copy-Item build\WhichPlugin.dll, build\WhichPlugin.pdb, config\WhichPlugin.ini $plugins
           Copy-Item README.md, LICENSE, THIRD_PARTY_NOTICES.md $docs.Parent
           Copy-Item build\_deps\commonlib-src\COPYING.txt "$docs\CommonLibSSE-NG.txt"
           Copy-Item build\_deps\commonlib-src\EXCEPTIONS.md "$docs\CommonLibSSE-NG-EXCEPTIONS.md"

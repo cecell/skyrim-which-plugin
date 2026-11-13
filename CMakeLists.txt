@@ -31,6 +31,8 @@ add_commonlibsse_plugin(${PROJECT_NAME}
 	AUTHOR "Cecell"
 	SOURCES
 		src/main.cpp
+		src/Open.cpp
+		src/Settings.cpp
 		src/ConsoleCommands.cpp
 		src/ConsoleHook.cpp
 		src/LoadOrder.cpp

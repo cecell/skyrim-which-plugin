@@ -1,6 +1,7 @@
 #include "Redirect.h"
 
 #include "ConsoleCommands.h"
+#include "Settings.h"
 
 #include <fstream>
 
@@ -8,7 +9,7 @@ namespace Redirect
 {
 	namespace
 	{
-		std::filesystem::path& LastFile()
+		std::filesystem::path& Last()
 		{
 			static std::filesystem::path last;
 			return last;
@@ -23,19 +24,10 @@ namespace Redirect
 			return a_text.substr(first, a_text.find_last_not_of(" \t") - first + 1);
 		}
 
-		// Documents\My Games\Skyrim Special Edition (the parent of SKSE's log folder).
-		std::optional<std::filesystem::path> BaseFolder()
-		{
-			auto logs = SKSE::log::log_directory();
-			if (!logs) {
-				return std::nullopt;
-			}
-			return logs->parent_path();
-		}
-
 		// Validates a user-typed file name and makes it absolute. Returns an error message or "".
 		std::string Resolve(std::string_view a_name, std::filesystem::path& a_out)
 		{
+			const bool  anywhere = Settings::Get().writeFileAnywhere;
 			std::string name{ Trim(a_name) };
 			if (name.size() >= 2 && (name.front() == '"' || name.front() == '\'') && name.back() == name.front()) {
 				name = name.substr(1, name.size() - 2);
@@ -43,28 +35,35 @@ namespace Redirect
 			if (name.empty()) {
 				return "needs a file name";
 			}
-			for (char c : name) {
-				if (std::string_view{ "<>:\"|?*" }.find(c) != std::string_view::npos) {
+			for (std::size_t i = 0; i < name.size(); ++i) {
+				const char c = name[i];
+				const bool driveColon = anywhere && c == ':' && i == 1;  // D:\...
+				if (!driveColon && std::string_view{ "<>:\"|?*" }.find(c) != std::string_view::npos) {
 					return std::format("'{}' can't be used in a file name", c);
 				}
 			}
 			std::filesystem::path rel{ name };
-			if (rel.is_absolute() || rel.has_root_name() || rel.has_root_directory()) {
-				return "use a name relative to My Games\\Skyrim Special Edition, not a full path";
-			}
-			for (const auto& part : rel) {
-				if (part == "..") {
-					return "'..' isn't allowed; files stay inside My Games\\Skyrim Special Edition";
+			if (!anywhere) {
+				if (rel.is_absolute() || rel.has_root_name() || rel.has_root_directory()) {
+					return "use a name relative to My Games\\Skyrim Special Edition\\wp, not a full path (bWriteFileAnywhere allows them)";
+				}
+				for (const auto& part : rel) {
+					if (part == "..") {
+						return "'..' isn't allowed; files stay inside My Games\\Skyrim Special Edition\\wp (bWriteFileAnywhere allows it)";
+					}
 				}
 			}
 			if (!rel.has_extension()) {
 				rel += ".txt";
 			}
-			const auto base = BaseFolder();
+			if (!AllowedExtension(rel)) {
+				return std::format("can't write a {} file; use .txt .csv .tsv .log .md .ini .toml .xml .yaml .yml or .json", rel.extension().string());
+			}
+			const auto base = OutputFolder();
 			if (!base) {
 				return "couldn't find the My Games\\Skyrim Special Edition folder";
 			}
-			a_out = *base / rel;
+			a_out = rel.is_absolute() ? rel : *base / rel;
 			return "";
 		}
 
@@ -127,7 +126,8 @@ namespace Redirect
 		while (pos + count < a_args.size() && a_args[pos + count] == '>') {
 			++count;
 		}
-		const auto rest = Trim(a_args.substr(pos + count));
+		const bool force = count == 1 && pos + 1 < a_args.size() && a_args[pos + 1] == '!';
+		const auto rest = Trim(a_args.substr(pos + count + (force ? 1 : 0)));
 		const auto command = a_args.substr(0, pos);
 
 		if (count >= 3) {
@@ -136,18 +136,48 @@ namespace Redirect
 		}
 
 		a_target.kind = count == 2 ? Kind::Append : Kind::Replace;
+		a_target.force = force;
+		const auto op = count == 2 ? ">>"sv : force ? ">!"sv : ">"sv;
 		if (rest.empty() && a_target.kind == Kind::Append) {
-			if (LastFile().empty()) {
+			if (Last().empty()) {
 				a_target.error = "'>>' with no file name appends to the last file, but none has been used yet (e.g. >> results)";
 			} else {
-				a_target.path = LastFile();
+				a_target.path = Last();
 			}
 			return command;
 		}
 		if (auto err = Resolve(rest, a_target.path); !err.empty()) {
-			a_target.error = std::format("'{}' {}", count == 2 ? ">>" : ">", err);
+			a_target.error = std::format("'{}' {}", op, err);
+		} else if (a_target.kind == Kind::Replace && !force && Settings::Get().overwriteNeedsConfirm) {
+			std::error_code ec;
+			if (std::filesystem::exists(a_target.path, ec)) {
+				a_target.error = std::format("'>' {} already exists; use '>!' to replace it, or '>>' to add to it", a_target.path.filename().string());
+			}
 		}
 		return command;
+	}
+
+	std::optional<std::filesystem::path> OutputFolder()
+	{
+		// The game's own folder is the parent of SKSE's log folder.
+		const auto logs = SKSE::log::log_directory();
+		if (!logs) {
+			return std::nullopt;
+		}
+		return logs->parent_path() / "wp";
+	}
+
+	const std::filesystem::path& LastFile()
+	{
+		return Last();
+	}
+
+	bool AllowedExtension(const std::filesystem::path& a_path)
+	{
+		auto ext = a_path.extension().string();
+		std::ranges::transform(ext, ext.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+		constexpr std::array kText{ ".txt"sv, ".csv"sv, ".tsv"sv, ".log"sv, ".md"sv, ".ini"sv, ".toml"sv, ".xml"sv, ".yaml"sv, ".yml"sv };
+		return ext.starts_with(".json") || std::ranges::find(kText, ext) != kText.end();
 	}
 
 	void Deliver(const Target& a_target, const std::vector<std::string>& a_lines)
@@ -182,7 +212,7 @@ namespace Redirect
 		}
 		out << text;
 		out.close();
-		LastFile() = a_target.path;
+		Last() = a_target.path;
 		Print(std::format("  -> {} {} lines to {}", a_target.kind == Kind::Append ? "appended" : "wrote", a_lines.size(), a_target.path.string()));
 	}
 }
